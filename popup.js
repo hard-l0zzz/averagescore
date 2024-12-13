@@ -1,9 +1,8 @@
 // popup.js
 document.addEventListener('DOMContentLoaded', () => {
-
-
-    chrome.storage.local.get('grades', (data) => {
+    chrome.storage.local.get(['grades', 'failingGrades'], (data) => {
         const gradesDict = data.grades || {};
+        const failingGradesDict = data.failingGrades || {};
         let outputHtml = '';
 
         for (const [subject, grades] of Object.entries(gradesDict)) {
@@ -13,36 +12,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         document.getElementById('average').innerHTML = outputHtml || '<p>Нет оценок</p>';
-    });
-    // Находим кнопку "Обновить" по ID и добавляем обработчик события
-    const updateButton = document.getElementById('update_button'); // Исправлено на правильный ID
 
+        // Выводим информацию о двойках
+        let failingOutputHtml = '';
+        for (const [subject, dates] of Object.entries(failingGradesDict)) {
+            failingOutputHtml += `<p>${subject.charAt(0).toUpperCase() + subject.slice(1)}: ${dates.join(', ')}</p>`;
+        }
+
+        document.getElementById('failing').innerHTML = failingOutputHtml || '<p>Нет двоек</p>';
+    });
+
+    const updateButton = document.getElementById('update_button');
     updateButton.addEventListener('click', async () => {
         document.getElementById('update_button').textContent = 'Подождите...';
-    
-        // Ждем завершения получения оценок
+        
         await getGrades();
-    
-        // Получаем оценки из хранилища
-        chrome.storage.local.get('grades', (data) => {
+        
+        chrome.storage.local.get(['grades', 'failingGrades'], (data) => {
             const gradesDict = data.grades || {};
+            const failingGradesDict = data.failingGrades || {};
             let outputHtml = '';
-    
+
             for (const [subject, grades] of Object.entries(gradesDict)) {
                 const averageGrade = (grades.reduce((a, b) => a + b, 0) / grades.length).toFixed(2);
                 const formattedSubject = subject.charAt(0).toUpperCase() + subject.slice(1);
                 outputHtml += `<p>${formattedSubject}: ${averageGrade}</p>`;
             }
-    
+
             document.getElementById('average').innerHTML = outputHtml || '<p>Нет оценок</p>';
+
+            // Выводим информацию о двойках
+            let failingOutputHtml = '';
+            for (const [subject, dates] of Object.entries(failingGradesDict)) {
+                failingOutputHtml += `<p>${subject.charAt(0).toUpperCase() + subject.slice(1)}: ${dates.join(', ')}</p>`;
+            }
+
+            document.getElementById('failing').innerHTML = failingOutputHtml || '<p>Нет двойок</p>';
         });
-    
-        // Возвращаем текст кнопки к исходному состоянию
+
         document.getElementById('update_button').textContent = 'Обновить';
     });
 });
-
-
 
 const gradesMapping = {
     "отлично": 5,
@@ -51,11 +61,11 @@ const gradesMapping = {
     "неудовлетворительно": 2
 };
 
-
 async function getGrades() {
     const gradesDict = {};
+    const failingGradesDict = {}; // Новый объект для хранения двойок и их дат
     let page = 1;
-    let finished = false; // Флаг для отслеживания завершения
+    let finished = false;
 
     while (!finished) {
         const response = await fetch(`https://cabinet.ruobr.ru/student/progress/?page=${page}`);
@@ -64,43 +74,40 @@ async function getGrades() {
         const doc = parser.parseFromString(text, 'text/html');
         const rows = doc.querySelectorAll("table.table tbody tr");
         const now = new Date();
-        const monthNow = now.getMonth() + 1; // Текущий месяц (1-12)
-    
-        // Проверка текущего месяца
+        const monthNow = now.getMonth() + 1;
+
         if (monthNow === 8) {
-            console.log("отдыхай не парься!"); // Если август
-            break; // Выход из цикла
+            console.log("отдыхай не парься!");
+            break;
         } else if (monthNow === 9) {
-            finished = true; // Если сентябрь
+            finished = true;
         } else if (monthNow >= 1 && monthNow <= 7) {
             if (monthNow === 1) {
-                finished = true; // Если январь
+                finished = true;
             }
         }
-    
-        if (rows.length === 0) break; // Если нет строк, выходим из цикла
-    
+
+        if (rows.length === 0) break;
+
         rows.forEach(row => {
             const tds = row.querySelectorAll("td");
             if (tds.length < 4) return;
-    
+
             const dateStr = tds[1].textContent.trim();
             const subjectName = tds[2].textContent.trim().toLowerCase();
             const gradeStr = tds[3].textContent.trim();
-    
+
             // Проверка даты
             const dateMatch = dateStr.match(/(\d{2})\.(\d{2})\.(\d{4})/);
             if (dateMatch) {
                 const day = parseInt(dateMatch[1]);
                 const month = parseInt(dateMatch[2]);
                 const year = parseInt(dateMatch[3]);
-    
-                // Установка флага, если дата <= 1 сентября 2024
+
                 if (year < 2024 || (year === 2024 && (month < 9 || (month === 9 && day < 1)))) {
-                    finished = true; // Устанавливаем флаг завершения
+                    finished = true;
                 }
             }
-
 
             // Добавление оценки в словарь
             const gradeValue = gradesMapping[gradeStr.toLowerCase()];
@@ -109,6 +116,14 @@ async function getGrades() {
                     gradesDict[subjectName] = [];
                 }
                 gradesDict[subjectName].push(gradeValue);
+
+                // Проверка на двойку
+                if (gradeValue === 2) {
+                    if (!failingGradesDict[subjectName]) {
+                        failingGradesDict[subjectName] = [];
+                    }
+                    failingGradesDict[subjectName].push(dateStr); // Сохраняем дату двойки
+                }
             }
         });
 
@@ -116,10 +131,8 @@ async function getGrades() {
         page++;
     }
 
-    // Выводим сообщение о завершении
     console.log("Закончил");
 
-    // Сохраняем оценки в хранилище
-    chrome.storage.local.set({ grades: gradesDict });
+    // Сохраняем оценки и двойки в хранилище
+    chrome.storage.local.set({ grades: gradesDict, failingGrades: failingGradesDict });
 }
-
