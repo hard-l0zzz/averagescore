@@ -1,0 +1,22 @@
+{
+  "icons": {
+   "16": "favicon.png",
+   "32": "favicon.png",
+   "48": "favicon.png",
+   "128": "favicon.png"
+ },
+  "manifest_version": 3,
+  "name": "Средний балл",
+  "version": "1.0",
+  "description": "Извлечение оценок с сайта и расчет среднего балла.",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://cabinet.ruobr.ru/student/progress/*"],
+      "js": ["popup.js"]
+    }
+  ]
+}
